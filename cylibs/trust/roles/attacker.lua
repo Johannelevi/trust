@@ -21,6 +21,10 @@ state.AutoEngageMode:set_description('Off', "Manually engage and disengage.")
 state.AutoEngageMode:set_description('Always', "Automatically engage when targeting a claimed mob.")
 state.AutoEngageMode:set_description('Mirror', "Mirror the engage status of the party member you are assisting.")
 
+state.AutoDisengageMode = M{['description'] = 'Auto Disengage Mode', 'Off', 'Auto'}
+state.AutoDisengageMode:set_description('Off', "Do not disengage when unable to attack a mob.")
+state.AutoDisengageMode:set_description('Auto', "Automatically disengage when unable to attack a mob.")
+
 function Attacker.new(action_queue, attacker_settings)
     local self = setmetatable(Gambiter.new(action_queue, { Gambits = L{} }, L{ state.AutoEngageMode, state.AutoPullMode }), Attacker)
 
@@ -43,10 +47,27 @@ function Attacker:on_add()
     self.dispose_bag:add(self:get_party():on_party_target_change():addAction(function(_, _)
         self:check_gambits()
     end), self:get_party():on_party_target_change())
+
+    self.dispose_bag:add(WindowerEvents.ActionMessage:addAction(function(actor_id, target_id, actor_index, target_index, message_id, param_1, param_2, param_3)
+        if state.AutoDisengageMode.value == 'Off' then
+            return
+        end
+        if actor_id == windower.ffxi.get_player().id then
+            if message_id == 4 or message_id == 5 then
+                -- 4: out of range, 5: unable to see
+                self.num_unable_attack = self.num_unable_attack + 1
+                if self.num_unable_attack > 5 then
+                    self.action_queue:push_action(Disengage.new():to_action())
+                end
+            end
+        end
+    end), WindowerEvents.ActionMessage)
 end
 
 function Attacker:target_change(target_index)
     Gambiter.target_change(self, target_index)
+
+    self.num_unable_attack = 0
 
     self:check_gambits()
 end
@@ -80,6 +101,7 @@ function Attacker:set_attacker_settings(attacker_settings)
                 GambitCondition.new(StatusCondition.new('Engaged'), GambitTarget.TargetType.Self),
             }, Disengage.new(), GambitTarget.TargetType.Self),
             Gambit.new(GambitTarget.TargetType.Enemy, L{
+                GambitCondition.new(NotCondition.new(L{ ModeCondition.new('AutoEngageMode', 'Off') }), GambitTarget.TargetType.Self),
                 GambitCondition.new(NotCondition.new(L{ ModeCondition.new('PullActionMode', 'Target') }), GambitTarget.TargetType.Self),
                 GambitCondition.new(StatusCondition.new('Idle'), GambitTarget.TargetType.Self),
                 GambitCondition.new(TargetMismatchCondition.new(), GambitTarget.TargetType.Self),

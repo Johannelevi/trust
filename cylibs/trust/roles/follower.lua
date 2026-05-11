@@ -71,6 +71,9 @@ function Follower:on_add()
         if new_status == 'Idle' and L{ 'Dead', 'Engaged' }:contains(old_status) then
             self:start_following(true)
         end
+        if new_status == 'Event' then
+            self.walk_action_queue:clear()
+        end
     end), self:get_party():get_player():on_status_change())
 
     self.dispose_bag:add(self:get_party():on_party_assist_target_change():addAction(function(_, assist_target)
@@ -252,6 +255,9 @@ function Follower:set_follow_target(target)
             self:check_distance()
         end), self.follow_target:on_position_change())
         self.follow_target_dispose_bag:add(self.follow_target:on_zone_change():addAction(function(p, zone_id, x, y, z, zone_line, zone_type)
+            if state.AutoFollowMode.value == 'Off' then
+                return
+            end
             if zone_util.is_valid_zone_request(zone_line, zone_type) then
                 self:zone(zone_id, x, y, z, zone_line, zone_type)
             end
@@ -263,7 +269,7 @@ end
 
 function Follower:can_zone(zone_id)
     local player = self:get_party():get_player()
-    if not player or (os.time() - player:get_last_zone_time()) < self.zone_cooldown
+    if state.AutoFollowMode.value == 'Off' or not player or (os.time() - player:get_last_zone_time()) < self.zone_cooldown
             or zone_id ~= windower.ffxi.get_info().zone or windower.ffxi.get_info().zone == 0 then
         return false
     end

@@ -8,6 +8,7 @@ local inventory_util = require('cylibs/util/inventory_util')
 local IpcRelay = require('cylibs/messages/ipc/ipc_relay')
 local MobUpdateMessage = require('cylibs/messages/mob_update_message')
 local packets = require('packets')
+local TargetChangeMessage = require('cylibs/messages/target_change_message')
 local Timer = require('cylibs/util/timers/timer')
 local ZoneMessage = require('cylibs/messages/zone_message')
 
@@ -136,36 +137,40 @@ local incoming_event_dispatcher = {
         for _, target in pairs(act.targets) do
             local action = target.actions[1]
             if action then
-                if action_message_util.is_gain_debuff_message(action.message) and act.param and not L{260, 360}:contains(act.param) then
-                    local debuff = buff_util.debuff_for_spell(act.param)
-                    if debuff then
-                        WindowerEvents.GainDebuff:trigger(target.id, debuff.id)
-                    end
-                end
                 -- Dia
                 if act.param and S{23, 24, 25}:contains(act.param) and S{252}:contains(action.message) then
                     local debuff = buff_util.debuff_for_spell(act.param)
                     if debuff then
                         WindowerEvents.GainDebuff:trigger(target.id, debuff.id)
                     end
-                end
                 -- Bio
-                if act.param and S{230, 231, 232, 233, 234}:contains(act.param) and S{252}:contains(action.message) then
+                elseif act.param and S{230, 231, 232, 233, 234}:contains(act.param) and S{252}:contains(action.message) then
                     local debuff = buff_util.debuff_for_spell(act.param)
                     if debuff then
                         WindowerEvents.GainDebuff:trigger(target.id, debuff.id)
                     end
-                end
+                -- Kaustra
+                elseif act.param and act.param == 502 and S{2, 252}:contains(action.message) then
+                    WindowerEvents.GainDebuff:trigger(target.id, 23)
                 -- Helix
-                if act.param and S{278, 279, 280, 281, 282, 283, 284, 285, 885, 886, 887, 888, 889, 890, 891, 892}:contains(act.param) and S{2, 252}:contains(action.message) then
+                elseif act.param and S{278, 279, 280, 281, 282, 283, 284, 285}:contains(act.param) and S{2, 252}:contains(action.message) then
+                    if windower.ffxi.get_player().main_job ~= "SCH" or -- If main job not SCH
+                        windower.ffxi.get_player().job_points.sch.jp_spent < 100 -- Helix IIs are unlocked at 100 JP
+                    then
+                        WindowerEvents.GainDebuff:trigger(target.id, 186)
+                    end
+                elseif act.param and S{885, 886, 887, 888, 889, 890, 891, 892}:contains(act.param) and S{2, 252}:contains(action.message) then
                     WindowerEvents.GainDebuff:trigger(target.id, 186)
-                end
                 -- Blue Magic
-                if act.param == 727 then
+                elseif act.param == 727 then
                     WindowerEvents.GainDebuff:trigger(target.id, res.spells[727].status)
-                end
-                if act.param == 728 then
+                elseif act.param == 728 then
                     WindowerEvents.GainDebuff:trigger(target.id, res.spells[728].status)
+                elseif action_message_util.is_gain_debuff_message(action.message) and act.param and not L{260, 360}:contains(act.param) then
+                    local debuff = buff_util.debuff_for_spell(act.param)
+                    if debuff then
+                        WindowerEvents.GainDebuff:trigger(target.id, debuff.id)
+                    end
                 end
             end
         end
@@ -277,8 +282,8 @@ local incoming_event_dispatcher = {
             local target = windower.ffxi.get_mob_by_id(target_id)
             if target and not IpcRelay.shared():is_connected(target.name) then
                 WindowerEvents.PositionChanged:trigger(target_id, packet['X'], packet['Y'], packet['Z'])
+                WindowerEvents.TargetIndexChanged:trigger(target_id, packet['Target Index'])
             end
-            WindowerEvents.TargetIndexChanged:trigger(target_id, packet['Target Index'])
         end
 
         -- packet['Status'] doesn't always match mob.status and packet['Update Status'] doesn't work for 0x00D
@@ -498,9 +503,11 @@ local outgoing_event_dispatcher = {
         local z = packet['Z']
 
         WindowerEvents.PositionChanged:trigger(target_id, x, y, z)
-        WindowerEvents.TargetIndexChanged:trigger(target_id, packet['Target Index'])
-
-        IpcRelay.shared():send_message(MobUpdateMessage.new(windower.ffxi.get_player().name, x, y, z))
+        if windower.ffxi.get_mob_by_target('st') == nil then
+            WindowerEvents.TargetIndexChanged:trigger(target_id, packet['Target Index'])
+            IpcRelay.shared():send_message(MobUpdateMessage.new(windower.ffxi.get_player().name, x, y, z))
+            IpcRelay.shared():send_message(TargetChangeMessage.new(windower.ffxi.get_player().name, packet['Target Index']))
+        end
     end,
 
     [0x05E] = function(data)
@@ -658,6 +665,11 @@ WindowerEvents.DisposeBag:add(IpcRelay.shared():on_message_received():addAction(
     elseif ipc_message.__class == EquipmentChangedMessage.__class then
         WindowerEvents.Equipment.MainWeaponChanged:trigger(ipc_message:get_mob_id(), ipc_message:get_main_weapon_id())
         WindowerEvents.Equipment.RangedWeaponChanged:trigger(ipc_message:get_mob_id(), ipc_message:get_ranged_weapon_id())
+    elseif ipc_message.__class == TargetChangeMessage.__class then
+        local player = windower.ffxi.get_mob_by_name(ipc_message:get_player_name())
+        if player then
+            WindowerEvents.TargetIndexChanged:trigger(player.id, ipc_message:get_target_index())
+        end
     end
 end), IpcRelay.shared():on_message_received())
 

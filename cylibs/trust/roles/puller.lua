@@ -1,14 +1,15 @@
 local AggroedCondition = require('cylibs/conditions/aggroed')
 local Approach = require('cylibs/battle/approach')
 local ConditionalCondition = require('cylibs/conditions/conditional')
+local CooldownCondition = require('cylibs/conditions/cooldown')
 local DisposeBag = require('cylibs/events/dispose_bag')
 local Engage = require('cylibs/battle/engage')
 local Gambit = require('cylibs/gambits/gambit')
 local GambitTarget = require('cylibs/gambits/gambit_target')
+local HasMaxNumAlterEgosCondition = require('cylibs/conditions/has_max_num_alter_egos')
 local MobFilter = require('cylibs/battle/monsters/mob_filter')
 local PartyClaimedCondition = require('cylibs/conditions/party_claimed')
 local PartyLeaderCondition = require('cylibs/conditions/party_leader')
-local PartyMemberCountCondition = require('cylibs/conditions/party_member_count')
 local PartyTargetedCondition = require('cylibs/conditions/party_targeted')
 local RunToLocationAction = require('cylibs/actions/runtolocation')
 local TargetNamesCondition = require('cylibs/conditions/target_names')
@@ -76,10 +77,17 @@ function Puller:on_add()
     self.dispose_bag:add(WindowerEvents.MobKO:addAction(function(mob_id, mob_name, status)
         if self:get_target() and self:get_target():get_id() == mob_id then
             logger.notice(self.__class, 'mob_ko', mob_name, self:get_target():get_mob().hpp, status)
+            CooldownCondition.set_timestamp('last_mob_ko', os.time())
             self:set_pull_target(nil) -- this is necessary otherwise get_target() returns valid until next loop
             self:check_target(L{ mob_id })
         end
     end), WindowerEvents.MobKO)
+
+    self.dispose_bag:add(self:get_party():get_player():on_status_change():addAction(function(_, new_status, old_status)
+        if L{ 'Event' }:contains(new_status) then
+            self:set_pull_target(nil)
+        end
+    end), self:get_party():get_player():on_status_change())
 end
 
 function Puller:tic(_, _)
@@ -130,6 +138,9 @@ end
 
 function Puller:get_all_targets()
     local all_targets = L{}
+    if not self:check_delay() then
+        return all_targets
+    end
     if state.AutoPullMode.value == 'Aggroed' then
         -- 1. Aggroed mobs that are unclaimed and not targeted by party members
         -- 2. Aggroed mobs that are unclaimed
@@ -152,11 +163,28 @@ function Puller:get_all_targets()
         all_targets = self.mob_filter:get_nearby_mobs(L{ MobFilter.Type.PartyClaimed })
                 + self.mob_filter:get_nearby_mobs(L{ MobFilter.Type.Unclaimed })
     end
+    local target_names = self.target_names
+    table.sort(all_targets, function(a, b)
+        local index_a = target_names:indexOf(a.name)
+        local index_b = target_names:indexOf(b.name)
+        if index_a == -1 then index_a = math.huge end
+        if index_b == -1 then index_b = math.huge end
+        return index_a < index_b
+    end)
     return all_targets
+end
+
+function Puller:check_delay()
+    local last_mob_ko = CooldownCondition.get_timestamp('last_mob_ko')
+    return last_mob_ko == nil or os.time() >= last_mob_ko + self.delay
 end
 
 function Puller:get_next_target(target_id_blacklist)
     target_id_blacklist = target_id_blacklist or L{}
+
+    if self:get_party():get_player():get_status() == 'Event' or not self:check_delay() then
+        return nil
+    end
 
     local current_target = self:get_alliance():get_target_by_index(self:get_party():get_player():get_target_index())
     if current_target and not target_id_blacklist:contains(current_target:get_id()) and self:is_valid_target(current_target:get_mob())
@@ -221,6 +249,7 @@ function Puller:set_pull_settings(pull_settings)
     self.pull_settings = pull_settings
     self.distance = pull_settings.Distance
     self.blacklist = pull_settings.Blacklist
+    self.delay = pull_settings.Delay or 0
     self.mob_filter = MobFilter.new(self:get_alliance(), self.distance or 25, nil, self.blacklist)
     if pull_settings.RandomizeTarget then
         self.max_num_targets = 6
@@ -228,6 +257,8 @@ function Puller:set_pull_settings(pull_settings)
         self.max_num_targets = 1
     end
     self:set_target_names(pull_settings.Targets or L{})
+
+    CooldownCondition.set_timestamp('last_mob_ko', os.time() - self.delay)
 
     for gambit in pull_settings.Gambits:it() do
         gambit.conditions = gambit.conditions:filter(function(condition)
@@ -278,14 +309,14 @@ function Puller:get_default_conditions(gambit)
         conditions:append(GambitCondition.new(TargetNamesCondition.new(self:get_target_names()), GambitTarget.TargetType.Enemy))
     end
     local alter_ego_conditions = L{
-        -- FIXME: lower party member count condition from 6
         GambitCondition.new(ConditionalCondition.new(
             L{
                 NotCondition.new(L{ PartyLeaderCondition.new() }),
                 ModeCondition.new('AutoTrustsMode', 'Off'),
-                ConditionalCondition.new(L{ ModeCondition.new('AutoTrustsMode', 'Auto'), ModeCondition.new('AutoPullMode', 'Auto'), PartyMemberCountCondition.new(6, Condition.Operator.GreaterThanOrEqualTo) }, Condition.LogicalOperator.And)
+                ConditionalCondition.new(L{ ModeCondition.new('AutoTrustsMode', 'Auto'), NotCondition.new(L{ ModeCondition.new('AutoPullMode', 'Off') }), HasMaxNumAlterEgosCondition.new() }, Condition.LogicalOperator.And)
             },
-            Condition.LogicalOperator.Or), GambitTarget.TargetType.Self)
+            Condition.LogicalOperator.Or), GambitTarget.TargetType.Self
+        )
     }
     return (alter_ego_conditions + conditions + self.job:get_conditions_for_ability(gambit:getAbility())):map(function(condition)
         if condition.__type ~= GambitCondition.__type then

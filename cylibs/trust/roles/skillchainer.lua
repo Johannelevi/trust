@@ -199,7 +199,7 @@ function Skillchainer:check_skillchain()
 
     local next_ability
     local step = self.skillchain_builder:get_current_step()
-    if step and not step:is_expired() and not step:is_closed() then
+    if step and not step:is_expired() and (state.SkillchainDelayMode.value ~= 'Off' or not step:is_closed()) then
         if step:is_window_open() then
             logger.notice(self.__class, 'check_skillchain', 'get_next_steps')
             if state.SkillchainDelayMode.value ~= 'Off' then
@@ -255,6 +255,9 @@ function Skillchainer:get_next_ability(current_step)
             return gambit:getAbility()
         end
     else
+        if gambit and not self:is_gambit_satisfied(gambit) then
+            return nil
+        end
         if current_step == nil then
             local ability = self:get_starter_ability(self.num_skillchain_steps)
             if ability and Condition.check_conditions(ability:get_conditions(), self:get_party():get_player():get_mob().index) then
