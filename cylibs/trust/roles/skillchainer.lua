@@ -13,6 +13,7 @@ local SkillchainBuilder = require('cylibs/battle/skillchains/skillchain_builder'
 local SkillchainPropertyCondition = require('cylibs/conditions/skillchain_property')
 local SkillchainTracker = require('cylibs/battle/skillchains/skillchain_tracker')
 local skillchain_util = require('cylibs/util/skillchain_util')
+local weapons = require('cylibs/res/weapons')
 
 state.AutoSkillchainMode = M{['description'] = 'Create Skillchains', 'Off', 'Auto', 'Cleave', 'Spam'}
 state.AutoSkillchainMode:set_description('Auto', "Automatically skillchain with self and party members.")
@@ -65,6 +66,27 @@ function Skillchainer.new(action_queue, weapon_skill_settings, job)
     self.action_identifier = self.__class..'_perform_skillchain'
     self.active_skills = L{}
     self.skillchain_builder = SkillchainBuilder.new()
+    self.skillchain_builder.include_aeonic = function(ability)
+        local skill = ability:get_skill()
+        if not skill or not skill.aeonic or not skill.weapon then
+            return false
+        end
+
+        local party = self:get_party()
+        local player = party and party:get_player()
+        if player == nil then
+            return false
+        end
+
+        local equipped_weapon_names = L{ player:get_main_weapon_id(), player:get_ranged_weapon_id() }
+                :compact_map()
+                :map(function(weapon_id)
+                    return weapons[weapon_id] and weapons[weapon_id].en
+                end)
+                :compact_map()
+
+        return equipped_weapon_names:contains(skill.weapon)
+    end
     self.last_check_skillchain_time = os.time() - 1
 
     self.ready_weaponskill = Event.newEvent()
@@ -182,6 +204,11 @@ function Skillchainer:target_change(target_index)
     Role.target_change(self, target_index)
 
     self.is_performing_ability = false
+
+    if self.skillchain_tracker then
+        local target = self:get_target()
+        self.skillchain_builder:set_current_step(target and self.skillchain_tracker:get_current_step(target.id) or nil)
+    end
 end
 
 function Skillchainer:check_skillchain()

@@ -118,6 +118,8 @@ function Condition.defaultSerializableConditionClasses()
         MinTacticalPointsCondition.__class,
         MaxDistanceCondition.__class,
         HasBuffCondition.__class,
+        HasKeyItemsCondition.__class,
+        HasRaiseCondition.__class,
         ZoneCondition.__class,
         MainJobCondition.__class,
         SubJobCondition.__class,

@@ -292,6 +292,7 @@ function GambitConditionSettingsMenuItem:getEditableConditionClasses()
         [NumResistsCondition.__type] = "num_resists",
         [SkillchainPropertyCondition.__type] = "skillchain_property",
         [HasDazeCondition.__type] = "has_daze",
+        [HasRaiseCondition.__type] = "has_raise",
         [TargetNameCondition.__type] = "target_name",
         [CombatSkillsCondition.__type] = "combat_skills",
         [StrategemCountCondition.__type] = "strategem_count",
@@ -311,7 +312,8 @@ function GambitConditionSettingsMenuItem:getEditableConditionClasses()
         [PartyHasMainJobCondition.__type] = "party_has_main_job",
         [PartyHppRangeCondition.__type] = "party_hpp_range",
         [PartyMemberCountCondition.__type] = "party_member_count",
-        [SkillchainAbilityCondition.__type] = "skillchain_ability"
+        [SkillchainAbilityCondition.__type] = "skillchain_ability",
+        [HasKeyItemsCondition.__type] = "has_key_items"
     }
 end
 
